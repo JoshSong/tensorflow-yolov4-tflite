@@ -11,8 +11,13 @@ from core import utils
 from core.utils import freeze_all, unfreeze_all
 
 flags.DEFINE_string('model', 'yolov4', 'yolov4, yolov3 or yolov3-tiny')
-flags.DEFINE_string('weights', './data/yolov4.weights', 'pretrained weights')
+#flags.DEFINE_string('weights', './data/yolov4.weights', 'pretrained weights')
+flags.DEFINE_string('weights', None, 'pretrained weights')
 flags.DEFINE_boolean('tiny', False, 'yolo or yolo-tiny')
+
+OUTPUT_DIR = 'output'
+SUMMARY_STEPS = 10
+CKPT_STEPS = 5000
 
 def main(_argv):
     physical_devices = tf.config.experimental.list_physical_devices('GPU')
@@ -21,7 +26,7 @@ def main(_argv):
 
     trainset = Dataset('train')
     testset = Dataset('test')
-    logdir = "./data/log"
+    logdir = OUTPUT_DIR
     isfreeze = False
     steps_per_epoch = len(trainset)
     first_stage_epochs = cfg.TRAIN.FISRT_STAGE_EPOCHS
@@ -84,7 +89,7 @@ def main(_argv):
     if os.path.exists(logdir): shutil.rmtree(logdir)
     writer = tf.summary.create_file_writer(logdir)
 
-    def train_step(image_data, target):
+    def train_step(image_data, target, write_summary):
         with tf.GradientTape() as tape:
             pred_result = model(image_data, training=True)
             giou_loss = conf_loss = prob_loss = 0
@@ -116,13 +121,15 @@ def main(_argv):
             optimizer.lr.assign(lr.numpy())
 
             # writing summary data
-            with writer.as_default():
-                tf.summary.scalar("lr", optimizer.lr, step=global_steps)
-                tf.summary.scalar("loss/total_loss", total_loss, step=global_steps)
-                tf.summary.scalar("loss/giou_loss", giou_loss, step=global_steps)
-                tf.summary.scalar("loss/conf_loss", conf_loss, step=global_steps)
-                tf.summary.scalar("loss/prob_loss", prob_loss, step=global_steps)
-            writer.flush()
+            if write_summary:
+                with writer.as_default():
+                    tf.summary.scalar("lr", optimizer.lr, step=global_steps)
+                    tf.summary.scalar("loss/total_loss", total_loss, step=global_steps)
+                    tf.summary.scalar("loss/giou_loss", giou_loss, step=global_steps)
+                    tf.summary.scalar("loss/conf_loss", conf_loss, step=global_steps)
+                    tf.summary.scalar("loss/prob_loss", prob_loss, step=global_steps)
+                writer.flush()
+
     def test_step(image_data, target):
         with tf.GradientTape() as tape:
             pred_result = model(image_data, training=True)
@@ -141,6 +148,7 @@ def main(_argv):
             tf.print("=> TEST STEP %4d   giou_loss: %4.2f   conf_loss: %4.2f   "
                      "prob_loss: %4.2f   total_loss: %4.2f" % (global_steps, giou_loss, conf_loss,
                                                                prob_loss, total_loss))
+            return total_loss
 
     for epoch in range(first_stage_epochs + second_stage_epochs):
         if epoch < first_stage_epochs:
@@ -156,10 +164,20 @@ def main(_argv):
                     freeze = model.get_layer(name)
                     unfreeze_all(freeze)
         for image_data, target in trainset:
-            train_step(image_data, target)
-        for image_data, target in testset:
-            test_step(image_data, target)
-        model.save_weights("./checkpoints/yolov4")
+            write_summary = global_steps % SUMMARY_STEPS == 0
+            train_step(image_data, target, write_summary)
+
+            if global_steps % CKPT_STEPS == 0:
+                val_losses = []
+                for image_data, target in testset:
+                    val_losses.append(test_step(image_data, target))
+
+                tf.print('AVG val loss: ' + str(np.mean(val_losses)))
+                with writer.as_default():
+                    tf.summary.scalar("val_loss/total_loss", np.mean(val_losses), step=global_steps)
+                writer.flush()
+
+                model.save_weights(os.path.join(OUTPUT_DIR, "checkpoints/ckpt-" + str(int(global_steps))))
 
 if __name__ == '__main__':
     try:
