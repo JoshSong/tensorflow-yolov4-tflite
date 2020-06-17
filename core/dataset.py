@@ -31,6 +31,11 @@ class Dataset(object):
 
         self.train_input_sizes = cfg.TRAIN.INPUT_SIZE
         self.strides = np.array(cfg.YOLO.STRIDES)
+
+        # hacky fix, don't care about last one, just can't be bothered to remove lbox stuff
+        if len(cfg.YOLO.STRIDES) < 3:
+            self.strides = np.array(cfg.YOLO.STRIDES + [32])
+
         self.classes = utils.read_class_names(cfg.YOLO.CLASSES)
         self.num_classes = len(self.classes)
         self.anchors = np.array(utils.get_anchors(cfg.YOLO.ANCHORS))

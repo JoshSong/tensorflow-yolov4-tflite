@@ -9,15 +9,20 @@ import core.utils as utils
 from core.config import cfg
 from core.yolov4 import YOLOv4, YOLOv3, YOLOv3_tiny, decode
 
-flags.DEFINE_string('weights', './data/yolov4.weights',
+flags.DEFINE_string('weights', './output/checkpoints/ckpt-95000',
                     'path to weights file')
 flags.DEFINE_string('framework', 'tf', 'select model type in (tf, tflite)'
                     'path to weights file')
 flags.DEFINE_string('model', 'yolov4', 'yolov3 or yolov4')
 flags.DEFINE_boolean('tiny', False, 'yolov3 or yolov3-tiny')
-flags.DEFINE_integer('size', 512, 'resize images to')
-flags.DEFINE_string('annotation_path', "./data/dataset/val2017.txt", 'annotation path')
-flags.DEFINE_string('write_image_path', "./data/detection/", 'write image path')
+flags.DEFINE_integer('size', 608, 'resize images to')
+flags.DEFINE_string('annotation_path', "./data/dataset/syn_patent9_val_ref_fig.txt", 'annotation path')
+flags.DEFINE_string('write_image_path', "./detection/", 'write image path')
+
+# Fix for Could not create cudnn handle: CUDNN_STATUS_INTERNAL_ERROR
+physical_devices = tf.config.experimental.list_physical_devices('GPU')
+assert len(physical_devices) > 0, "Not enough GPU hardware devices available"
+tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 def main(_argv):
     INPUT_SIZE = FLAGS.size
@@ -69,7 +74,8 @@ def main(_argv):
                     bbox_tensor = decode(fm, NUM_CLASS, i)
                     bbox_tensors.append(bbox_tensor)
                 model = tf.keras.Model(input_layer, bbox_tensors)
-                utils.load_weights(model, FLAGS.weights)
+                #utils.load_weights(model, FLAGS.weights)
+                model.load_weights(FLAGS.weights)
 
     else:
         # Load TFLite model and allocate tensors.
@@ -129,6 +135,8 @@ def main(_argv):
             pred_bbox = tf.concat(pred_bbox, axis=0)
             bboxes = utils.postprocess_boxes(pred_bbox, image_size, INPUT_SIZE, cfg.TEST.SCORE_THRESHOLD)
             bboxes = utils.nms(bboxes, cfg.TEST.IOU_THRESHOLD, method='nms')
+            #bboxes.sort(key=lambda x:x[-2], reverse=True)
+            #bboxes = bboxes[:FLAGS.max_bboxes]
 
             if cfg.TEST.DECTECTED_IMAGE_PATH is not None:
                 image = utils.draw_bbox(image, bboxes)

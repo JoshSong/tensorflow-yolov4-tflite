@@ -104,6 +104,63 @@ def cspdarknet53(input_data):
 
     return route_1, route_2, input_data
 
+
+def anno_net(input_data):
+    """Copied cspdarknet53
+    Added another conv layer before first downsample for more fine detail
+    Moved some residual_blocks up
+    Removed final output so strides in config should be changed from [8, 16, 32] to [8, 16]
+    """
+
+    input_data = common.convolutional(input_data, (3, 3,  3,  32), activate_type="mish")
+    input_data = common.convolutional(input_data, (3, 3,  3,  48), activate_type="mish")
+    input_data = common.convolutional(input_data, (3, 3, 32,  64), downsample=True, activate_type="mish")
+
+    route = input_data
+    route = common.convolutional(route, (1, 1, 64, 64), activate_type="mish")
+    input_data = common.convolutional(input_data, (1, 1, 64, 64), activate_type="mish")
+    for i in range(2):
+        input_data = common.residual_block(input_data,  64,  32, 64, activate_type="mish")
+    input_data = common.convolutional(input_data, (1, 1, 64, 64), activate_type="mish")
+
+    input_data = tf.concat([input_data, route], axis=-1)
+    input_data = common.convolutional(input_data, (1, 1, 128, 64), activate_type="mish")
+    input_data = common.convolutional(input_data, (3, 3, 64, 128), downsample=True, activate_type="mish")
+    route = input_data
+    route = common.convolutional(route, (1, 1, 128, 64), activate_type="mish")
+    input_data = common.convolutional(input_data, (1, 1, 128, 64), activate_type="mish")
+    for i in range(4):
+        input_data = common.residual_block(input_data, 64,  64, 64, activate_type="mish")
+    input_data = common.convolutional(input_data, (1, 1, 64, 64), activate_type="mish")
+    input_data = tf.concat([input_data, route], axis=-1)
+
+    input_data = common.convolutional(input_data, (1, 1, 128, 128), activate_type="mish")
+    input_data = common.convolutional(input_data, (3, 3, 128, 256), downsample=True, activate_type="mish")
+    route = input_data
+    route = common.convolutional(route, (1, 1, 256, 128), activate_type="mish")
+    input_data = common.convolutional(input_data, (1, 1, 256, 128), activate_type="mish")
+    for i in range(6):
+        input_data = common.residual_block(input_data, 128, 128, 128, activate_type="mish")
+    input_data = common.convolutional(input_data, (1, 1, 128, 128), activate_type="mish")
+    input_data = tf.concat([input_data, route], axis=-1)
+
+    input_data = common.convolutional(input_data, (1, 1, 256, 256), activate_type="mish")
+    route_1 = input_data
+    input_data = common.convolutional(input_data, (3, 3, 256, 512), downsample=True, activate_type="mish")
+    route = input_data
+    route = common.convolutional(route, (1, 1, 512, 256), activate_type="mish")
+    input_data = common.convolutional(input_data, (1, 1, 512, 256), activate_type="mish")
+    for i in range(6):
+        input_data = common.residual_block(input_data, 256, 256, 256, activate_type="mish")
+    input_data = common.convolutional(input_data, (1, 1, 256, 256), activate_type="mish")
+    input_data = tf.concat([input_data, route], axis=-1)
+
+    input_data = common.convolutional(input_data, (1, 1, 512, 512), activate_type="mish")
+    route_2 = input_data
+
+    return route_1, route_2
+
+
 def darknet53_tiny(input_data):
     input_data = common.convolutional(input_data, (3, 3, 3, 16))
     input_data = tf.keras.layers.MaxPool2D(2, 2, 'same')(input_data)

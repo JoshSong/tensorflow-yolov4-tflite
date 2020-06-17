@@ -2,7 +2,7 @@
 # coding=utf-8
 
 import tensorflow as tf
-# import tensorflow_addons as tfa
+import tensorflow_addons as tfa
 class BatchNormalization(tf.keras.layers.BatchNormalization):
     """
     "Frozen state" and "inference mode" are two separate concepts.
@@ -16,7 +16,7 @@ class BatchNormalization(tf.keras.layers.BatchNormalization):
         training = tf.logical_and(training, self.trainable)
         return super().call(x, training)
 
-def convolutional(input_layer, filters_shape, downsample=False, activate=True, bn=True, activate_type='leaky'):
+def convolutional(input_layer, filters_shape, downsample=False, activate=True, bn=True, activate_type='leaky', force_float32=False):
     if downsample:
         input_layer = tf.keras.layers.ZeroPadding2D(((1, 0), (1, 0)))(input_layer)
         padding = 'valid'
@@ -25,22 +25,29 @@ def convolutional(input_layer, filters_shape, downsample=False, activate=True, b
         strides = 1
         padding = 'same'
 
-    conv = tf.keras.layers.Conv2D(filters=filters_shape[-1], kernel_size = filters_shape[0], strides=strides, padding=padding,
-                                  use_bias=not bn, kernel_regularizer=tf.keras.regularizers.l2(0.0005),
-                                  kernel_initializer=tf.random_normal_initializer(stddev=0.01),
-                                  bias_initializer=tf.constant_initializer(0.))(input_layer)
+    if force_float32:
+        conv = tf.keras.layers.Conv2D(filters=filters_shape[-1], kernel_size = filters_shape[0], strides=strides, padding=padding,
+                                      use_bias=not bn, kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                      kernel_initializer=tf.random_normal_initializer(stddev=0.01),
+                                      bias_initializer=tf.constant_initializer(0.),
+                                      dtype='float32')(input_layer)
+    else:
+        conv = tf.keras.layers.Conv2D(filters=filters_shape[-1], kernel_size = filters_shape[0], strides=strides, padding=padding,
+                                      use_bias=not bn, kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+                                      kernel_initializer=tf.random_normal_initializer(stddev=0.01),
+                                      bias_initializer=tf.constant_initializer(0.))(input_layer)
 
     if bn: conv = BatchNormalization()(conv)
     if activate == True:
         if activate_type == "leaky":
             conv = tf.nn.leaky_relu(conv, alpha=0.1)
         elif activate_type == "mish":
-            conv = mish(conv)
+            #conv = mish(conv)
             # conv = softplus(conv)
             # conv = conv * tf.math.tanh(tf.math.softplus(conv))
             # conv = conv * tf.tanh(softplus(conv))
             # conv = tf.nn.leaky_relu(conv, alpha=0.1)
-            # conv = tfa.activations.mish(conv)
+            conv = tfa.activations.mish(conv)
             # conv = conv * tf.nn.tanh(tf.keras.activations.relu(tf.nn.softplus(conv), max_value=20))
             # conv = tf.nn.softplus(conv)
             # conv = tf.keras.activations.relu(tf.nn.softplus(conv), max_value=20)
