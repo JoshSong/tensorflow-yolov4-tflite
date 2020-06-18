@@ -13,13 +13,13 @@ __C.YOLO                      = edict()
 
 # Set the class name
 __C.YOLO.CLASSES              = "./data/classes/anno.names"
-__C.YOLO.ANCHORS              = "./data/anchors/yolov4_anchors.txt"
+__C.YOLO.ANCHORS              = "./data/anchors/anno_anchors.txt"
 __C.YOLO.ANCHORS_V3           = "./data/anchors/yolov3_anchors.txt"
 __C.YOLO.ANCHORS_TINY         = "./data/anchors/basline_tiny_anchors.txt"
 #__C.YOLO.STRIDES              = [8, 16, 32]
 __C.YOLO.STRIDES              = [8, 16]
 __C.YOLO.STRIDES_TINY         = [16, 32]
-__C.YOLO.XYSCALE              = [1.2, 1.1, 1.05]
+__C.YOLO.XYSCALE              = [0.8, 1.0, 1.2]
 __C.YOLO.ANCHOR_PER_SCALE     = 3
 __C.YOLO.IOU_LOSS_THRESH      = 0.5
 
@@ -27,7 +27,7 @@ __C.YOLO.IOU_LOSS_THRESH      = 0.5
 # Train options
 __C.TRAIN                     = edict()
 
-__C.TRAIN.ANNOT_PATH          = "./data/dataset/syn_patent9_ref_fig.txt"
+__C.TRAIN.ANNOT_PATH          = "./data/dataset/syn_patent9_10.txt"
 __C.TRAIN.BATCH_SIZE          = 2
 # __C.TRAIN.INPUT_SIZE            = [320, 352, 384, 416, 448, 480, 512, 544, 576, 608]
 __C.TRAIN.INPUT_SIZE          = 768
@@ -43,9 +43,9 @@ __C.TRAIN.SECOND_STAGE_EPOCHS   = 3
 # TEST options
 __C.TEST                      = edict()
 
-__C.TEST.ANNOT_PATH           = "./data/dataset/syn_patent9_val_ref_fig.txt"
+__C.TEST.ANNOT_PATH           = "./data/dataset/syn_patent9_val.txt"
 __C.TEST.BATCH_SIZE           = 2
-__C.TEST.INPUT_SIZE           = 608
+__C.TEST.INPUT_SIZE           = 768
 __C.TEST.DATA_AUG             = False
 __C.TEST.DECTECTED_IMAGE_PATH = "./data/detection/"
 __C.TEST.SCORE_THRESHOLD      = 0.25

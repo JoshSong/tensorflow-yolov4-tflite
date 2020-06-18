@@ -154,11 +154,15 @@ def decode(conv_output, NUM_CLASS, i=0):
     return tensor of shape [batch_size, output_size, output_size, anchor_per_scale, 5 + num_classes]
             contains (x, y, w, h, score, probability)
     """
-    conv_shape       = tf.shape(conv_output)
-    batch_size       = conv_shape[0]
-    output_size      = conv_shape[1]
+    # this is causing an error with saving model h5 for some reason...
+    #conv_shape       = tf.shape(conv_output)
 
+    conv_shape       = conv_output.get_shape()
+    #batch_size       = conv_shape[0]
+    batch_size       = 1
+    output_size      = conv_shape[1]
     conv_output = tf.reshape(conv_output, (batch_size, output_size, output_size, 3, 5 + NUM_CLASS))
+
     conv_raw_xywh, conv_raw_conf, conv_raw_prob = tf.split(conv_output, (4, 1, NUM_CLASS), axis=-1)
 
     pred_conf = tf.sigmoid(conv_raw_conf)

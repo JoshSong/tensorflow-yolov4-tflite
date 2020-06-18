@@ -7,22 +7,22 @@ import numpy as np
 import tensorflow as tf
 import core.utils as utils
 from core.config import cfg
-from core.yolov4 import YOLOv4, YOLOv3, YOLOv3_tiny, decode
+from core.yolov4 import YOLOv4, YOLOv3, YOLOv3_tiny, anno, decode
 
-flags.DEFINE_string('weights', './output/checkpoints/ckpt-95000',
+flags.DEFINE_string('weights', './output/checkpoints/ckpt-XXXX',
                     'path to weights file')
 flags.DEFINE_string('framework', 'tf', 'select model type in (tf, tflite)'
                     'path to weights file')
-flags.DEFINE_string('model', 'yolov4', 'yolov3 or yolov4')
+flags.DEFINE_string('model', 'anno', 'yolov3 or yolov4')
 flags.DEFINE_boolean('tiny', False, 'yolov3 or yolov3-tiny')
-flags.DEFINE_integer('size', 608, 'resize images to')
+flags.DEFINE_integer('size', 768, 'resize images to')
 flags.DEFINE_string('annotation_path', "./data/dataset/syn_patent9_val_ref_fig.txt", 'annotation path')
 flags.DEFINE_string('write_image_path', "./detection/", 'write image path')
 
 # Fix for Could not create cudnn handle: CUDNN_STATUS_INTERNAL_ERROR
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
-assert len(physical_devices) > 0, "Not enough GPU hardware devices available"
-tf.config.experimental.set_memory_growth(physical_devices[0], True)
+#assert len(physical_devices) > 0, "Not enough GPU hardware devices available"
+#tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 def main(_argv):
     INPUT_SIZE = FLAGS.size
@@ -33,6 +33,9 @@ def main(_argv):
         STRIDES = np.array(cfg.YOLO.STRIDES)
         if FLAGS.model == 'yolov4':
             ANCHORS = utils.get_anchors(cfg.YOLO.ANCHORS, FLAGS.tiny)
+        elif FLAGS.model =='anno':
+            ANCHORS = utils.get_anchors(cfg.YOLO.ANCHORS)
+            ANCHORS = ANCHORS[:2, :, :]
         else:
             ANCHORS = utils.get_anchors(cfg.YOLO.ANCHORS_V3, FLAGS.tiny)
     NUM_CLASS = len(utils.read_class_names(cfg.YOLO.CLASSES))
@@ -76,6 +79,14 @@ def main(_argv):
                 model = tf.keras.Model(input_layer, bbox_tensors)
                 #utils.load_weights(model, FLAGS.weights)
                 model.load_weights(FLAGS.weights)
+            elif FLAGS.model == 'anno':
+                feature_maps = anno(input_layer, NUM_CLASS)
+                bbox_tensors = []
+                for i, fm in enumerate(feature_maps):
+                    bbox_tensor = decode(fm, NUM_CLASS, i)
+                    bbox_tensors.append(bbox_tensor)
+                model = tf.keras.Model(input_layer, bbox_tensors)
+                model.load_weights(FLAGS.weights)
 
     else:
         # Load TFLite model and allocate tensors.
@@ -95,20 +106,23 @@ def main(_argv):
             image_name = image_path.split('/')[-1]
             image = cv2.imread(image_path)
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            bbox_data_gt = np.array([list(map(int, box.split(','))) for box in annotation[1:]])
 
-            if len(bbox_data_gt) == 0:
-                bboxes_gt = []
-                classes_gt = []
-            else:
-                bboxes_gt, classes_gt = bbox_data_gt[:, :4], bbox_data_gt[:, 4]
+            bboxes_gt = []
+            classes_gt = []
+            for box in annotation[1:]:
+                bboxes_gt.append(list(map(int, box.split(',')[:4])))
+                classes_gt.append(list(map(int, box.split(',')[4:])))
+            bboxes_gt = np.array(bboxes_gt)
+
             ground_truth_path = os.path.join(ground_truth_dir_path, str(num) + '.txt')
 
             print('=> ground truth of %s:' % image_name)
             num_bbox_gt = len(bboxes_gt)
             with open(ground_truth_path, 'w') as f:
                 for i in range(num_bbox_gt):
-                    class_name = CLASSES[classes_gt[i]]
+                    scores_gt = np.zeros(len(CLASSES))
+                    scores_gt[classes_gt[i]] = 1
+                    class_name = utils.post_process_prediction(CLASSES, scores_gt)
                     xmin, ymin, xmax, ymax = list(map(str, bboxes_gt[i]))
                     bbox_mess = ' '.join([class_name, xmin, ymin, xmax, ymax]) + '\n'
                     f.write(bbox_mess)
@@ -121,33 +135,37 @@ def main(_argv):
             image_data = image_data[np.newaxis, ...].astype(np.float32)
 
             if FLAGS.framework == "tf":
+                import time
+                start = time.time()
                 pred_bbox = model.predict(image_data)
+                print('took ' + str(time.time() - start))
             else:
                 interpreter.set_tensor(input_details[0]['index'], image_data)
                 interpreter.invoke()
                 pred_bbox = [interpreter.get_tensor(output_details[i]['index']) for i in range(len(output_details))]
             if FLAGS.model == 'yolov3':
                 pred_bbox = utils.postprocess_bbbox(pred_bbox, ANCHORS, STRIDES)
-            elif FLAGS.model == 'yolov4':
+            #elif FLAGS.model == 'yolov4':
+            else:
                 XYSCALE = cfg.YOLO.XYSCALE
                 pred_bbox = utils.postprocess_bbbox(pred_bbox, ANCHORS, STRIDES, XYSCALE=XYSCALE)
 
-            pred_bbox = tf.concat(pred_bbox, axis=0)
-            bboxes = utils.postprocess_boxes(pred_bbox, image_size, INPUT_SIZE, cfg.TEST.SCORE_THRESHOLD)
-            bboxes = utils.nms(bboxes, cfg.TEST.IOU_THRESHOLD, method='nms')
+            bboxes, class_probs = utils.postprocess_boxes(pred_bbox, image_size, INPUT_SIZE, cfg.TEST.SCORE_THRESHOLD)
+            bboxes, class_probs = utils.nms(bboxes, class_probs, cfg.TEST.IOU_THRESHOLD, method='nms')
             #bboxes.sort(key=lambda x:x[-2], reverse=True)
             #bboxes = bboxes[:FLAGS.max_bboxes]
 
             if cfg.TEST.DECTECTED_IMAGE_PATH is not None:
-                image = utils.draw_bbox(image, bboxes)
+                image = utils.draw_bbox(image, bboxes, class_probs)
                 cv2.imwrite(cfg.TEST.DECTECTED_IMAGE_PATH + image_name, image)
 
             with open(predict_result_path, 'w') as f:
-                for bbox in bboxes:
+                for i in range(len(bboxes)):
+                    bbox = bboxes[i]
                     coor = np.array(bbox[:4], dtype=np.int32)
                     score = bbox[4]
                     class_ind = int(bbox[5])
-                    class_name = CLASSES[class_ind]
+                    class_name = utils.post_process_prediction(CLASSES, class_probs[i])
                     score = '%.4f' % score
                     xmin, ymin, xmax, ymax = list(map(str, coor))
                     bbox_mess = ' '.join([class_name, score, xmin, ymin, xmax, ymax]) + '\n'

@@ -1,6 +1,7 @@
 import cv2
 import random
 import colorsys
+import string
 import numpy as np
 import tensorflow as tf
 from core.config import cfg
@@ -166,9 +167,10 @@ def image_preprocess(image, target_size, gt_boxes=None):
         return image_paded, gt_boxes
 
 
-def draw_bbox(image, bboxes, classes=read_class_names(cfg.YOLO.CLASSES), show_label=True):
+def draw_bbox(image, bboxes, class_probs, classes=read_class_names(cfg.YOLO.CLASSES), show_label=True):
     """
     bboxes: [x_min, y_min, x_max, y_max, probability, cls_id] format coordinates.
+    class_probs: matrix of class probabilities
     """
 
     num_classes = len(classes)
@@ -192,7 +194,7 @@ def draw_bbox(image, bboxes, classes=read_class_names(cfg.YOLO.CLASSES), show_la
         cv2.rectangle(image, c1, c2, bbox_color, bbox_thick)
 
         if show_label:
-            bbox_mess = '%s: %.2f' % (classes[class_ind], score)
+            bbox_mess = '%s: %.2f' % (post_process_prediction(classes, class_probs[i]), score)
             t_size = cv2.getTextSize(bbox_mess, 0, fontScale, thickness=bbox_thick//2)[0]
             cv2.rectangle(image, c1, (c1[0] + t_size[0], c1[1] - t_size[1] - 3), bbox_color, -1)  # filled
 
@@ -256,25 +258,30 @@ def bboxes_ciou(boxes1, boxes2):
 
     return iou - ciou_term
 
-def nms(bboxes, iou_threshold, sigma=0.3, method='nms'):
+def nms(bboxes, class_probs, iou_threshold, sigma=0.3, method='nms'):
     """
-    :param bboxes: (xmin, ymin, xmax, ymax, score, class)
+    :param bboxes: (xmin, ymin, xmax, ymax, score, class) class is index 0 to 3, representing ref/fig/ref90/fig90
+    :param class_probs: matrix of all class probabilities
 
     Note: soft-nms, https://arxiv.org/pdf/1704.04503.pdf
           https://github.com/bharatsingh430/soft-nms
     """
     classes_in_img = list(set(bboxes[:, 5]))
     best_bboxes = []
+    best_class_probs = []
 
     for cls in classes_in_img:
         cls_mask = (bboxes[:, 5] == cls)
         cls_bboxes = bboxes[cls_mask]
+        cls_class_probs = class_probs[cls_mask]
 
         while len(cls_bboxes) > 0:
             max_ind = np.argmax(cls_bboxes[:, 4])
             best_bbox = cls_bboxes[max_ind]
             best_bboxes.append(best_bbox)
+            best_class_probs.append(cls_class_probs[max_ind])
             cls_bboxes = np.concatenate([cls_bboxes[: max_ind], cls_bboxes[max_ind + 1:]])
+            cls_class_probs = np.concatenate([cls_class_probs[: max_ind], cls_class_probs[max_ind + 1:]])
             iou = bboxes_iou(best_bbox[np.newaxis, :4], cls_bboxes[:, :4])
             weight = np.ones((len(iou),), dtype=np.float32)
 
@@ -290,8 +297,9 @@ def nms(bboxes, iou_threshold, sigma=0.3, method='nms'):
             cls_bboxes[:, 4] = cls_bboxes[:, 4] * weight
             score_mask = cls_bboxes[:, 4] > 0.
             cls_bboxes = cls_bboxes[score_mask]
+            cls_class_probs = cls_class_probs[score_mask]
 
-    return best_bboxes
+    return best_bboxes, best_class_probs
 
 def diounms_sort(bboxes, iou_threshold, sigma=0.3, method='nms', beta_nms=0.6):
     best_bboxes = []
@@ -312,7 +320,8 @@ def postprocess_bbbox(pred_bbox, ANCHORS, STRIDES, XYSCALE=[1,1,1]):
         pred_xy = ((tf.sigmoid(conv_raw_dxdy) * XYSCALE[i]) - 0.5 * (XYSCALE[i] - 1) + xy_grid) * STRIDES[i]
         # pred_wh = (tf.exp(conv_raw_dwdh) * ANCHORS[i]) * STRIDES[i]
         pred_wh = (tf.exp(conv_raw_dwdh) * ANCHORS[i])
-        pred[:, :, :, :, 0:4] = tf.concat([pred_xy, pred_wh], axis=-1)
+        class_prob = pred[:, :, :, :, 4:]
+        pred_bbox[i] = tf.concat((pred_xy, pred_wh, class_prob), axis=-1)
 
     pred_bbox = [tf.reshape(x, (-1, tf.shape(x)[-1])) for x in pred_bbox]
     pred_bbox = tf.concat(pred_bbox, axis=0)
@@ -350,14 +359,13 @@ def postprocess_boxes(pred_bbox, org_img_shape, input_size, score_threshold):
     scale_mask = np.logical_and((valid_scale[0] < bboxes_scale), (bboxes_scale < valid_scale[1]))
 
     # # (5) discard some boxes with low scores
-    classes = np.argmax(pred_prob, axis=-1)
-    scores = pred_conf * pred_prob[np.arange(len(pred_coor)), classes]
+    max_classes = np.argmax(pred_prob[:, :4], axis=-1) # get class label (ref/fig/ref90/fig90) with highest conf, used later for nms
+    scores = pred_conf * pred_prob[np.arange(len(pred_coor)), max_classes]
     # scores = pred_prob[np.arange(len(pred_coor)), classes]
     score_mask = scores > score_threshold
     mask = np.logical_and(scale_mask, score_mask)
-    coors, scores, classes = pred_coor[mask], scores[mask], classes[mask]
-
-    return np.concatenate([coors, scores[:, np.newaxis], classes[:, np.newaxis]], axis=-1)
+    coors, scores, max_classes, class_probs = pred_coor[mask], scores[mask], max_classes[mask], pred_prob[mask]
+    return np.concatenate([coors, scores[:, np.newaxis], max_classes[:, np.newaxis]], axis=-1), class_probs
 
 def freeze_all(model, frozen=True):
     model.trainable = not frozen
@@ -370,3 +378,24 @@ def unfreeze_all(model, frozen=False):
         for l in model.layers:
             unfreeze_all(l, frozen)
 
+
+def post_process_prediction(classes, scores):
+    """Post-process predicted vector to return e.g. 'ref_21A', 'fig90_42'
+
+    classes -- {index: class_name}
+    scores -- np array of class scores
+    """
+    type = classes[np.argmax(scores[:4])] # ref/fig/ref90/fig90
+    length_inds = sorted([ind for ind, cls in classes.items() if 'length' in cls])
+    length = np.argmax(scores[length_inds]) + 1 # no. of chars, 1-4
+    letter_inds = [ind for ind, cls in classes.items() if cls in string.ascii_letters]
+    chars = ''
+    for i in range(length):
+        digit_inds = sorted([ind for ind, cls in classes.items() if cls.endswith('digit' + str(i))])
+        if i == length - 1: # end char can be number or letter - choose based on score
+            letter_digit_inds = digit_inds + letter_inds
+            ind = letter_digit_inds[np.argmax(scores[letter_digit_inds])]
+        else:
+            ind = digit_inds[np.argmax(scores[digit_inds])]
+        chars += classes[ind].split('digit')[0].upper()
+    return type + '_' + chars

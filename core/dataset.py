@@ -84,8 +84,8 @@ class Dataset(object):
                     index = self.batch_count * self.batch_size + num
                     if index >= self.num_samples: index -= self.num_samples
                     annotation = self.annotations[index]
-                    image, bboxes = self.parse_annotation(annotation)
-                    label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes = self.preprocess_true_boxes(bboxes)
+                    image, bboxes, classes = self.parse_annotation(annotation)
+                    label_sbbox, label_mbbox, label_lbbox, sbboxes, mbboxes, lbboxes = self.preprocess_true_boxes(bboxes, classes)
 
                     batch_image[num, :, :, :] = image
                     batch_label_sbbox[num, :, :, :, :] = label_sbbox
@@ -167,7 +167,12 @@ class Dataset(object):
         if not os.path.exists(image_path):
             raise KeyError("%s does not exist ... " %image_path)
         image = cv2.imread(image_path)
-        bboxes = np.array([list(map(int, box.split(','))) for box in line[1:]])
+        bboxes = []
+        classes = []
+        for box in line[1:]:
+            bboxes.append(list(map(int, box.split(',')[:4])))
+            classes.append(list(map(int, box.split(',')[4:])))
+        bboxes = np.array(bboxes)
 
         if self.data_aug:
             image, bboxes = self.random_horizontal_flip(np.copy(image), np.copy(bboxes))
@@ -176,7 +181,7 @@ class Dataset(object):
 
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image, bboxes = utils.image_preprocess(np.copy(image), [self.train_input_size, self.train_input_size], np.copy(bboxes))
-        return image, bboxes
+        return image, bboxes, classes
 
     def bbox_iou(self, boxes1, boxes2):
 
@@ -200,16 +205,16 @@ class Dataset(object):
 
         return inter_area / union_area
 
-    def preprocess_true_boxes(self, bboxes):
+    def preprocess_true_boxes(self, bboxes, classes):
 
         label = [np.zeros((self.train_output_sizes[i], self.train_output_sizes[i], self.anchor_per_scale,
                            5 + self.num_classes)) for i in range(3)]
         bboxes_xywh = [np.zeros((self.max_bbox_per_scale, 4)) for _ in range(3)]
         bbox_count = np.zeros((3,))
 
-        for bbox in bboxes:
-            bbox_coor = bbox[:4]
-            bbox_class_ind = bbox[4]
+        for j in range(len(classes)):
+            bbox_coor = bboxes[j]
+            bbox_class_ind = classes[j]
 
             onehot = np.zeros(self.num_classes, dtype=np.float)
             onehot[bbox_class_ind] = 1.0

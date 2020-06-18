@@ -169,7 +169,7 @@ def main(_argv):
             giou_loss = conf_loss = prob_loss = 0
 
             # optimizing process
-            for i in range(3):
+            for i in range(len(cfg.YOLO.STRIDES)):
                 conv, pred = pred_result[i * 2], pred_result[i * 2 + 1]
                 loss_items = compute_loss(pred, conv, target[i][0], target[i][1], STRIDES=STRIDES, NUM_CLASS=NUM_CLASS, IOU_LOSS_THRESH=IOU_LOSS_THRESH, i=i)
                 giou_loss += loss_items[0]
