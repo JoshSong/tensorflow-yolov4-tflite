@@ -243,15 +243,13 @@ def bbox_ciou(boxes1, boxes2):
 
 def bbox_giou(boxes1, boxes2):
 
-    boxes1 = tf.concat([boxes1[..., :2] - boxes1[..., 2:] * 0.5,
-                        boxes1[..., :2] + boxes1[..., 2:] * 0.5], axis=-1)
-    boxes2 = tf.concat([boxes2[..., :2] - boxes2[..., 2:] * 0.5,
-                        boxes2[..., :2] + boxes2[..., 2:] * 0.5], axis=-1)
+    # convert from x,y,w,h to x1,y1,x2,y2
+    boxes1 = tf.concat([boxes1[..., :2] - boxes1[..., 2:] * 0.5, boxes1[..., :2] + boxes1[..., 2:] * 0.5], axis=-1)
+    boxes2 = tf.concat([boxes2[..., :2] - boxes2[..., 2:] * 0.5, boxes2[..., :2] + boxes2[..., 2:] * 0.5], axis=-1)
 
-    boxes1 = tf.concat([tf.minimum(boxes1[..., :2], boxes1[..., 2:]),
-                        tf.maximum(boxes1[..., :2], boxes1[..., 2:])], axis=-1)
-    boxes2 = tf.concat([tf.minimum(boxes2[..., :2], boxes2[..., 2:]),
-                        tf.maximum(boxes2[..., :2], boxes2[..., 2:])], axis=-1)
+    # ensure x1,y1 < x2,y2. Also adding a small constant to avoid nans
+    boxes1 = tf.concat([tf.minimum(boxes1[..., :2], boxes1[..., 2:]), 0.0001 + tf.maximum(boxes1[..., :2], boxes1[..., 2:])], axis=-1)
+    boxes2 = tf.concat([tf.minimum(boxes2[..., :2], boxes2[..., 2:]), 0.0001 + tf.maximum(boxes2[..., :2], boxes2[..., 2:])], axis=-1)
 
     boxes1_area = (boxes1[..., 2] - boxes1[..., 0]) * (boxes1[..., 3] - boxes1[..., 1])
     boxes2_area = (boxes2[..., 2] - boxes2[..., 0]) * (boxes2[..., 3] - boxes2[..., 1])
