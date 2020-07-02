@@ -160,6 +160,30 @@ class Dataset(object):
 
         return image, bboxes
 
+    def random_pad(self, image, bboxes, max_size):
+        height, width, _ = image.shape
+        max_height, max_width = max_size
+        if height > max_height or width > max_width:
+            return image, bboxes
+
+        # pad to max size
+        if random.random() > 0.5:
+            padx = max_width - width
+            pady = max_height - height
+        else:
+            padx = random.randint(0, max_width - width)
+            pady = random.randint(0, max_height - height)
+
+        left_pad = random.randint(0, padx)
+        up_pad = random.randint(0, pady)
+
+        image_padded = np.full(shape=[height + pady, width + padx, 3], fill_value=255, dtype=np.uint8)
+        image_padded[up_pad:up_pad + height, left_pad:left_pad+width, :] = image
+
+        bboxes[:, [0, 2]] = bboxes[:, [0, 2]] + left_pad
+        bboxes[:, [1, 3]] = bboxes[:, [1, 3]] + up_pad
+        return image_padded, bboxes
+
     def parse_annotation(self, annotation):
 
         line = annotation.split()
@@ -175,9 +199,10 @@ class Dataset(object):
         bboxes = np.array(bboxes)
 
         if self.data_aug:
-            image, bboxes = self.random_horizontal_flip(np.copy(image), np.copy(bboxes))
-            image, bboxes = self.random_crop(np.copy(image), np.copy(bboxes))
-            image, bboxes = self.random_translate(np.copy(image), np.copy(bboxes))
+            #image, bboxes = self.random_horizontal_flip(np.copy(image), np.copy(bboxes))
+            #image, bboxes = self.random_crop(np.copy(image), np.copy(bboxes))
+            #image, bboxes = self.random_translate(np.copy(image), np.copy(bboxes))
+            image, bboxes = self.random_pad(np.copy(image), np.copy(bboxes), [self.train_input_size, self.train_input_size])
 
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image, bboxes = utils.image_preprocess(np.copy(image), [self.train_input_size, self.train_input_size], np.copy(bboxes))
